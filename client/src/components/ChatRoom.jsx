@@ -1,4 +1,4 @@
-// File: src/components/ChatRoom.jsx
+
 import { useState, useEffect, useRef } from "react";
 
 const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
@@ -6,7 +6,7 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
     { id: 1, sender: "System", text: "Welcome to the chat room!", timestamp: new Date() },
   ]);
   const [newMessage, setNewMessage] = useState("");
-  const [onlineUsers, setOnlineUsers] = useState(1); // default 1 for self
+  const [onlineUsers, setOnlineUsers] = useState(1); 
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
 
@@ -14,7 +14,7 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
     // Initialize socket
-    socketRef.current = new WebSocket("ws://localhost:8080");
+  socketRef.current = new WebSocket(import.meta.env.VITE_WS_URL);
 
     // Ensure messages are sent only after connection is open
     socketRef.current.onopen = () => {
