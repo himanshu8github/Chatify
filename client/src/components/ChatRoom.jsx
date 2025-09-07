@@ -47,6 +47,32 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
           setOnlineUsers(data.onlineUsers.length);
           break;
 
+        case "user_joined":
+          setOnlineUsers(data.onlineUsers.length);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              sender: "System",
+              text: `${data.username} joined the room`,
+              timestamp: new Date(),
+            },
+          ]);
+          break;
+
+        case "user_left":
+          setOnlineUsers(data.onlineUsers.length);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              sender: "System",
+              text: `${data.username} left the room`,
+              timestamp: new Date(),
+            },
+          ]);
+          break;
+
         default:
           break;
       }
@@ -80,17 +106,18 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
     new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="flex flex-col h-screen w-full bg-black text-white">
+    <div className="flex flex-col h-screen w-full bg-[#0a0a0a] text-white">
       {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 bg-indigo-600 shadow-md">
+      <div className="flex justify-between items-center px-6 py-4 bg-[#111111] shadow-md">
         <div className="flex flex-col">
           <h2 className="text-lg font-semibold">Room-Id: {roomId}</h2>
           <span className="text-sm opacity-80">{onlineUsers} users online</span>
         </div>
 
-         <div className="text-center">
-    <h1 className="text-3xl font-bold">Chatify</h1>
-  </div>
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-indigo-400">Chatify</h1>
+        </div>
+
         <button
           className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg text-sm font-medium transition"
           onClick={onLeaveRoom}
@@ -100,7 +127,7 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-gray-900">
+      <div className="flex-1 p-6 overflow-y-auto flex flex-col gap-4 bg-[#111111]">
         {messages.map((message) => (
           <div
             key={message.id}
@@ -118,10 +145,10 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
             <div
               className={`px-4 py-2 rounded-2xl shadow ${
                 message.sender === "System"
-                  ? "bg-gray-700 text-gray-300 text-sm text-center"
+                  ? "bg-[#1a1a1a] text-gray-300 text-sm text-center"
                   : message.sender === username
                   ? "bg-indigo-600 text-white rounded-tr-sm"
-                  : "bg-gray-200 text-black rounded-tl-sm"
+                  : "bg-[#222222] text-white rounded-tl-sm"
               }`}
             >
               <div className="mb-1">{message.text}</div>
@@ -136,7 +163,7 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
 
       {/* Input */}
       <form
-        className="flex items-center gap-3 px-4 py-3 bg-gray-800 border-t border-gray-700"
+        className="flex items-center gap-3 px-4 py-3 bg-[#1a1a1a] border-t border-gray-700"
         onSubmit={handleSendMessage}
       >
         <input
@@ -144,7 +171,7 @@ const ChatRoom = ({ roomId, username, onLeaveRoom }) => {
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
           placeholder="Type your message..."
-          className="flex-1 px-4 py-2 rounded-full bg-gray-700 text-white placeholder-gray-400 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 px-4 py-2 rounded-full bg-[#111111] text-white placeholder-gray-400 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
         <button
           type="submit"
