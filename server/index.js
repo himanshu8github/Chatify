@@ -1,3 +1,4 @@
+// File: index.js
 const http = require("http");
 const WebSocket = require("ws");
 const fs = require("fs");
@@ -5,16 +6,17 @@ const path = require("path");
 
 class WebSocketServer {
   constructor() {
-    this.clients = new Map();
+    this.clients = new Map(); // clientId => { socket, lastActivity, roomId }
+    this.rooms = new Map();   // roomId => Set of clientIds
     this.PORT = 8080;
 
-    // Create HTTP server
+    // HTTP server for serving static files (optional)
     this.server = http.createServer((req, res) => {
       if (req.url === "/" || req.url === "/index.html") {
-        const filePath = path.join(__dirname, "../public/index.html");
+        const filePath = path.join(__dirname, "public/index.html");
         this.serveFile(res, filePath, "text/html");
       } else {
-        const filePath = path.join(__dirname, "../public", req.url || "");
+        const filePath = path.join(__dirname, "public", req.url || "");
         this.serveFile(res, filePath);
       }
     });
@@ -24,6 +26,7 @@ class WebSocketServer {
     this.setupWebSocketEvents();
   }
 
+  // Serve static files
   serveFile(res, filePath, contentType) {
     fs.readFile(filePath, (err, data) => {
       if (err) {
@@ -35,24 +38,13 @@ class WebSocketServer {
       if (!contentType) {
         const ext = path.extname(filePath);
         switch (ext) {
-          case ".js":
-            contentType = "text/javascript";
-            break;
-          case ".css":
-            contentType = "text/css";
-            break;
-          case ".json":
-            contentType = "application/json";
-            break;
-          case ".png":
-            contentType = "image/png";
-            break;
+          case ".js": contentType = "text/javascript"; break;
+          case ".css": contentType = "text/css"; break;
+          case ".json": contentType = "application/json"; break;
+          case ".png": contentType = "image/png"; break;
           case ".jpg":
-          case ".jpeg":
-            contentType = "image/jpeg";
-            break;
-          default:
-            contentType = "text/plain";
+          case ".jpeg": contentType = "image/jpeg"; break;
+          default: contentType = "text/plain";
         }
       }
 
@@ -61,14 +53,14 @@ class WebSocketServer {
     });
   }
 
+  // WebSocket events
   setupWebSocketEvents() {
     this.wss.on("connection", (socket) => {
       const clientId = this.generateUniqueId();
-
       this.clients.set(clientId, {
-        id: clientId,
         socket,
         lastActivity: new Date(),
+        roomId: null,
       });
 
       console.log(`Client connected: ${clientId}`);
@@ -81,31 +73,29 @@ class WebSocketServer {
         timestamp: Date.now(),
       });
 
-      // Broadcast join
-      this.broadcast(
-        {
-          type: "user_joined",
-          content: { id: clientId },
-          sender: "server",
-          timestamp: Date.now(),
-        },
-        clientId
-      );
-
       // Handle messages
       socket.on("message", (data) => {
         try {
           const message = JSON.parse(data.toString());
-
           const client = this.clients.get(clientId);
           if (client) client.lastActivity = new Date();
 
-          if (!message.sender) message.sender = clientId;
-          if (!message.timestamp) message.timestamp = Date.now();
+          switch (message.type) {
+            case "join_room":
+              this.handleJoinRoom(clientId, message.roomId);
+              break;
 
-          console.log(`Received message from ${clientId}:`, message);
+            case "leave_room":
+              this.handleLeaveRoom(clientId);
+              break;
 
-          this.handleMessage(clientId, message);
+            case "chat":
+              this.handleMessage(clientId, message);
+              break;
+
+            default:
+              console.log("Unknown message type:", message.type);
+          }
         } catch (error) {
           console.error("Error processing message:", error);
           this.sendToClient(clientId, {
@@ -117,58 +107,84 @@ class WebSocketServer {
         }
       });
 
+      // Handle disconnection
       socket.on("close", () => {
         console.log(`Client disconnected: ${clientId}`);
+        this.handleLeaveRoom(clientId); // Remove from room
         this.clients.delete(clientId);
-
-        this.broadcast({
-          type: "user_left",
-          content: { id: clientId },
-          sender: "server",
-          timestamp: Date.now(),
-        });
       });
 
       socket.on("error", (error) => {
         console.error(`Error with client ${clientId}:`, error);
+        this.handleLeaveRoom(clientId);
         this.clients.delete(clientId);
       });
     });
   }
 
-  handleMessage(clientId, message) {
-    switch (message.type) {
-      case "chat":
-        this.broadcast(message);
-        break;
+  // Join room
+  handleJoinRoom(clientId, roomId) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
 
-      case "ping":
-        this.sendToClient(clientId, {
-          type: "pong",
-          content: { timestamp: Date.now() },
-          sender: "server",
-          timestamp: Date.now(),
-        });
-        break;
+    // Remove from previous room if exists
+    if (client.roomId) this.handleLeaveRoom(clientId);
 
-      case "private_message":
-        if (message.content && message.content.recipient) {
-          const recipientId = message.content.recipient;
-          this.sendToClient(recipientId, message);
-          this.sendToClient(clientId, {
-            type: "message_delivered",
-            content: { original: message },
-            sender: "server",
-            timestamp: Date.now(),
-          });
-        }
-        break;
+    client.roomId = roomId;
+    if (!this.rooms.has(roomId)) this.rooms.set(roomId, new Set());
+    this.rooms.get(roomId).add(clientId);
 
-      default:
-        console.log(`Unhandled message type: ${message.type}`);
-    }
+    // Broadcast updated user list to room
+    this.broadcastRoomUserList(roomId);
   }
 
+  // Leave room
+  handleLeaveRoom(clientId) {
+    const client = this.clients.get(clientId);
+    if (!client || !client.roomId) return;
+
+    const roomId = client.roomId;
+    if (this.rooms.has(roomId)) {
+      this.rooms.get(roomId).delete(clientId);
+      this.broadcastRoomUserList(roomId);
+
+      // Delete room if empty
+      if (this.rooms.get(roomId).size === 0) this.rooms.delete(roomId);
+    }
+    client.roomId = null;
+  }
+
+  // Broadcast online users in room
+  broadcastRoomUserList(roomId) {
+    if (!this.rooms.has(roomId)) return;
+
+    const users = Array.from(this.rooms.get(roomId));
+    const message = {
+      type: "user_list",
+      onlineUsers: users,
+      timestamp: Date.now(),
+      sender: "server",
+    };
+
+    users.forEach((clientId) => {
+      this.sendToClient(clientId, message);
+    });
+  }
+
+  // Handle chat message
+  handleMessage(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client || !client.roomId) return;
+
+    const roomClients = this.rooms.get(client.roomId);
+    if (!roomClients) return;
+
+    roomClients.forEach((id) => {
+      this.sendToClient(id, message);
+    });
+  }
+
+  // Send to single client
   sendToClient(clientId, message) {
     const client = this.clients.get(clientId);
     if (client && client.socket.readyState === WebSocket.OPEN) {
@@ -178,44 +194,37 @@ class WebSocketServer {
     return false;
   }
 
-  broadcast(message, excludeClientId) {
-    this.clients.forEach((client) => {
-      if (!excludeClientId || client.id !== excludeClientId) {
-        if (client.socket.readyState === WebSocket.OPEN) {
-          client.socket.send(JSON.stringify(message));
-        }
-      }
-    });
-  }
-
+  // Generate unique client ID
   generateUniqueId() {
     return `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  // Start server
   start() {
     this.server.listen(this.PORT, () => {
-      console.log(`WebSocket Server is running on port ${this.PORT}`);
+      console.log(`WebSocket Server running on port ${this.PORT}`);
     });
 
     setInterval(() => this.checkInactiveConnections(), 30000);
   }
 
+  // Remove inactive clients
   checkInactiveConnections() {
     const now = new Date();
     const timeout = 5 * 60 * 1000;
 
     this.clients.forEach((client, clientId) => {
-      const timeDiff = now.getTime() - client.lastActivity.getTime();
-      if (timeDiff > timeout) {
-        console.log(`Client ${clientId} timed out due to inactivity`);
+      if (now - client.lastActivity > timeout) {
+        console.log(`Client ${clientId} timed out`);
         client.socket.terminate();
+        this.handleLeaveRoom(clientId);
         this.clients.delete(clientId);
       }
     });
   }
 }
 
-// Create and start the server
+// Start the server
 const wsServer = new WebSocketServer();
 wsServer.start();
 
